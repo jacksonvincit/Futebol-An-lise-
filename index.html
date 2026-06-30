@@ -1,162 +1,204 @@
-// Um único arquivo de backend. Duas ações:
-// ?action=fixtures&scope=today|live   -> lista de jogos
-// ?action=predict&home=ID&away=ID     -> previsão de chutes/escanteios/cartões/faltas/gols
-//   somando a média recente de cada time
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FuteStat — Jogos e Previsões</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0b1f17; --panel: #122a20; --panel-2: #0e241b; --line: #1f3b2c;
+  --text: #edf3ee; --muted: #8fa79b; --lime: #c8ff4d; --cyan: #5fd8e0; --amber: #ffb15c;
+  --font-display: 'Oswald', sans-serif; --font-body: 'Inter', sans-serif; --font-mono: 'IBM Plex Mono', monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: radial-gradient(ellipse at top, #102a1f 0%, var(--bg) 60%); color: var(--text); font-family: var(--font-body); line-height: 1.5; }
+.topbar { display: flex; align-items: center; padding: 24px clamp(16px, 5vw, 48px) 8px; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-mark { font-family: var(--font-mono); font-weight: 600; font-size: 14px; letter-spacing: 0.08em; border: 1px solid var(--lime); color: var(--lime); padding: 6px 9px; border-radius: 4px; }
+.brand h1 { font-family: var(--font-display); font-weight: 700; font-size: 24px; margin: 0; text-transform: uppercase; }
+.brand-sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.disclaimer { margin: 8px clamp(16px, 5vw, 48px) 0; padding: 14px 18px; background: #1d1306; border: 1px solid #5a3c12; border-left: 4px solid var(--amber); border-radius: 6px; color: #f1d9b3; font-size: 13.5px; }
+main { padding: 20px clamp(16px, 5vw, 48px) 40px; max-width: 720px; margin: 0 auto; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.panel-head h2 { font-family: var(--font-display); font-size: 17px; text-transform: uppercase; letter-spacing: 0.03em; margin: 0; }
+.tabs { display: flex; gap: 6px; }
+.tab { background: transparent; border: 1px solid var(--line); color: var(--muted); padding: 6px 12px; border-radius: 20px; font-size: 13px; cursor: pointer; }
+.tab.active { border-color: var(--lime); color: var(--lime); }
+.fixtures-list { display: flex; flex-direction: column; gap: 8px; }
+.fixture-row { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; font-size: 13.5px; cursor: pointer; }
+.fixture-row:active { border-color: var(--lime); }
+.fixture-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.fixture-row .league { color: var(--muted); font-size: 11px; display: block; margin-bottom: 2px; }
+.fixture-score { font-family: var(--font-mono); color: var(--lime); font-weight: 600; white-space: nowrap; }
+.empty { color: var(--muted); font-size: 14px; }
+.league-filter { width: 100%; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); padding: 8px 10px; border-radius: 6px; font-family: var(--font-body); font-size: 13.5px; margin-bottom: 10px; }
+.estimate-tag { display: inline-block; font-size: 10px; color: var(--amber); border: 1px solid var(--amber); border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+.predict-box { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.predict-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; }
+.predict-row .pv { font-family: var(--font-mono); font-weight: 600; color: var(--lime); font-size: 16px; }
+.predict-sub { color: var(--muted); font-size: 11px; }
+.predict-meta { color: var(--muted); font-size: 11.5px; margin-bottom: 6px; }
+.footer { padding: 18px clamp(16px, 5vw, 48px) 30px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); max-width: 720px; margin: 0 auto; }
+</style>
+</head>
+<body>
 
-const MARKETS = {
-  shots_total: { label: 'Total de chutes', typeIds: [42] },
-  corners: { label: 'Escanteios', typeIds: [34] },
-  cards: { label: 'Cartões (amarelos + vermelhos)', typeIds: [84, 83] },
-  fouls: { label: 'Faltas', typeIds: [56] },
-  goals: { label: 'Gols', typeIds: [52] },
-};
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">FT</span>
+      <div>
+        <h1>FuteStat</h1>
+        <p class="brand-sub">Toque num jogo para ver a previsão estatística</p>
+      </div>
+    </div>
+  </header>
 
-const MAX_PAGES = 3;
-const TEAM_DAYS_BACK = 45;
-const MAX_MATCHES_PER_TEAM = 10;
+  <div class="disclaimer" role="note">
+    A previsão é a <strong>média recente</strong> de chutes, escanteios, cartões, faltas e gols dos dois
+    times somada — não é garantia de resultado. Quando um time não tem jogos recentes suficientes,
+    usamos uma <strong>média genérica de referência</strong> (marcada como "estimativa"), só pra você
+    sempre ter um número de comparação. Nenhuma ferramenta bate as odds das casas de apostas.
+    Jogue com responsabilidade, +18.
+  </div>
 
-async function sportmonksGet(path, params = {}) {
-  const token = process.env.SPORTMONKS_API_TOKEN;
-  if (!token) throw new Error('SPORTMONKS_API_TOKEN não configurado nas variáveis de ambiente da Netlify.');
-  const url = new URL('https://api.sportmonks.com/v3/football' + path);
-  url.searchParams.set('api_token', token);
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null) url.searchParams.set(k, v);
-  }
-  const res = await fetch(url.toString());
-  if (res.status === 429) throw new Error('RATE_LIMIT: limite de chamadas da Sportmonks atingido, tente de novo em alguns minutos.');
-  if (!res.ok) throw new Error(`Sportmonks HTTP ${res.status}: ${await res.text().catch(() => '')}`);
-  return res.json();
+  <main>
+    <section class="panel" id="fixtures-panel">
+      <div class="panel-head">
+        <h2>Jogos</h2>
+        <div class="tabs" id="fixture-tabs">
+          <button class="tab active" data-scope="today">Hoje</button>
+          <button class="tab" data-scope="live">Ao vivo</button>
+        </div>
+      </div>
+      <select id="league-filter" class="league-filter">
+        <option value="">Todas as ligas</option>
+      </select>
+      <div id="fixtures-list" class="fixtures-list"><p class="empty">Carregando jogos…</p></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>FuteStat não é casa de apostas e não garante resultados. Dados via API-Football.
+      Se apostar deixar de ser divertido, procure ajuda: <strong>0800 891 6080</strong> (CVV).</p>
+  </footer>
+
+<script>
+const API = '/.netlify/functions/api';
+const fixturesList = document.getElementById('fixtures-list');
+const fixtureTabs = document.getElementById('fixture-tabs');
+const leagueFilter = document.getElementById('league-filter');
+let currentFixtures = [];
+let allFixtures = [];
+
+function stateLabel(statusShort) {
+  if (statusShort === 'FT' || statusShort === 'AET' || statusShort === 'PEN') return 'Encerrado';
+  if (statusShort === 'NS') return 'Agendado';
+  return 'Em andamento';
 }
 
-function fmtDate(d) { return d.toISOString().slice(0, 10); }
-
-function mapFixture(fx) {
-  const participants = fx.participants || [];
-  const home = participants.find((p) => p.meta && p.meta.location === 'home') || participants[0];
-  const away = participants.find((p) => p.meta && p.meta.location === 'away') || participants[1];
-  const scoreFor = (id) => {
-    if (!fx.scores || !id) return null;
-    const s = fx.scores.find((sc) => sc.participant_id === id && sc.description === 'CURRENT');
-    return s ? s.score.goals : null;
-  };
-  return {
-    id: fx.id,
-    league: fx.league ? fx.league.name : null,
-    startingAt: fx.starting_at,
-    stateId: fx.state_id,
-    home: home ? home.name : '?',
-    away: away ? away.name : '?',
-    homeId: home ? home.id : null,
-    awayId: away ? away.id : null,
-    homeGoals: scoreFor(home && home.id),
-    awayGoals: scoreFor(away && away.id),
-  };
-}
-
-async function handleFixtures(qs) {
-  const scope = qs.scope === 'live' ? 'live' : 'today';
-  if (scope === 'live') {
-    const json = await sportmonksGet('/livescores/inplay', { include: 'participants;league;scores' });
-    return { fixtures: (json.data || []).map(mapFixture) };
-  }
-  const date = qs.date || fmtDate(new Date());
-  const json = await sportmonksGet(`/fixtures/date/${date}`, { include: 'participants;league;scores' });
-  return { fixtures: (json.data || []).map(mapFixture) };
-}
-
-function sumStat(statistics, participantId, typeIds) {
-  return statistics
-    .filter((s) => s.participant_id === participantId && typeIds.includes(s.type_id))
-    .reduce((acc, s) => acc + (s.data && typeof s.data.value === 'number' ? s.data.value : 0), 0);
-}
-
-async function teamAverages(teamId) {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - TEAM_DAYS_BACK);
-
-  let page = 1;
-  let all = [];
-  while (page <= MAX_PAGES) {
-    const json = await sportmonksGet(`/fixtures/between/${fmtDate(start)}/${fmtDate(end)}/${teamId}`, {
-      include: 'statistics;participants',
-      page,
-    });
-    all = all.concat(json.data || []);
-    if (!json.pagination || !json.pagination.has_more) break;
-    page += 1;
-  }
-
-  const finished = all
-    .filter((f) => f.state_id === 5 && Array.isArray(f.statistics) && f.statistics.length > 0)
-    .sort((a, b) => new Date(b.starting_at) - new Date(a.starting_at))
-    .slice(0, MAX_MATCHES_PER_TEAM);
-
-  const totals = {};
-  for (const key of Object.keys(MARKETS)) totals[key] = [];
-
-  for (const fx of finished) {
-    for (const [key, def] of Object.entries(MARKETS)) {
-      totals[key].push(sumStat(fx.statistics, teamId, def.typeIds));
+function populateLeagueFilter(fixtures) {
+  const leagues = [];
+  const seen = new Set();
+  for (const f of fixtures) {
+    if (f.leagueId && !seen.has(f.leagueId)) {
+      seen.add(f.leagueId);
+      leagues.push({ id: f.leagueId, label: f.leagueCountry ? `${f.league} (${f.leagueCountry})` : f.league });
     }
   }
-
-  const averages = {};
-  for (const [key, values] of Object.entries(totals)) {
-    averages[key] = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
-  }
-
-  return { averages, matchesAnalyzed: finished.length };
+  leagues.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+  leagueFilter.innerHTML = '<option value="">Todas as ligas</option>' +
+    leagues.map((l) => `<option value="${l.id}">${l.label}</option>`).join('');
 }
 
-function roundLine(predicted) {
-  const floor = Math.floor(predicted);
-  return predicted - floor >= 0.5 ? floor + 0.5 : floor - 0.5;
+function applyLeagueFilter() {
+  const selected = leagueFilter.value;
+  const filtered = selected ? allFixtures.filter((f) => String(f.leagueId) === selected) : allFixtures;
+  renderFixtures(filtered);
 }
 
-async function handlePredict(qs) {
-  const homeId = parseInt(qs.home, 10);
-  const awayId = parseInt(qs.away, 10);
-  if (!homeId || !awayId) throw new Error('Informe os parâmetros "home" e "away" (IDs dos times).');
+leagueFilter.addEventListener('change', applyLeagueFilter);
 
-  const [homeStats, awayStats] = await Promise.all([teamAverages(homeId), teamAverages(awayId)]);
-
-  const markets = [];
-  for (const [key, def] of Object.entries(MARKETS)) {
-    const h = homeStats.averages[key];
-    const a = awayStats.averages[key];
-    if (h === null || a === null) continue;
-    const predicted = Math.round((h + a) * 10) / 10;
-    markets.push({
-      marketLabel: def.label,
-      predictedTotal: predicted,
-      homeAvg: Math.round(h * 10) / 10,
-      awayAvg: Math.round(a * 10) / 10,
-      suggestedLine: roundLine(predicted),
-    });
-  }
-
-  return {
-    homeMatchesAnalyzed: homeStats.matchesAnalyzed,
-    awayMatchesAnalyzed: awayStats.matchesAnalyzed,
-    markets,
-  };
+function renderFixtures(fixtures) {
+  currentFixtures = fixtures;
+  if (!fixtures.length) { fixturesList.innerHTML = '<p class="empty">Nenhum jogo encontrado.</p>'; return; }
+  fixturesList.innerHTML = fixtures.map((f, idx) => {
+    const score = f.homeGoals !== null && f.awayGoals !== null ? `${f.homeGoals} - ${f.awayGoals}` : stateLabel(f.statusShort);
+    return `<div class="fixture-row" data-idx="${idx}">
+      <div class="fixture-top">
+        <div><span class="league">${f.league || ''}</span>${f.home} vs ${f.away}</div>
+        <div class="fixture-score">${score}</div>
+      </div>
+      <div class="predict-box" id="predict-${idx}" hidden></div>
+    </div>`;
+  }).join('');
 }
 
-exports.handler = async (event) => {
-  const qs = event.queryStringParameters || {};
-  const action = qs.action;
+async function loadFixtures(scope) {
+  fixturesList.innerHTML = '<p class="empty">Carregando jogos…</p>';
   try {
-    let result;
-    if (action === 'fixtures') result = await handleFixtures(qs);
-    else if (action === 'predict') result = await handlePredict(qs);
-    else return { statusCode: 400, body: JSON.stringify({ error: 'Use ?action=fixtures ou ?action=predict.' }) };
-
-    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result) };
+    const res = await fetch(`${API}?action=fixtures&scope=${scope}`);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Erro ao buscar jogos');
+    allFixtures = json.fixtures || [];
+    populateLeagueFilter(allFixtures);
+    leagueFilter.value = '';
+    renderFixtures(allFixtures);
   } catch (err) {
-    const msg = String(err && err.message ? err.message : err);
-    const status = /RATE_LIMIT/.test(msg) ? 429 : /Informe/.test(msg) ? 400 : 500;
-    return { statusCode: status, body: JSON.stringify({ error: msg }) };
+    fixturesList.innerHTML = `<p class="empty">Não foi possível carregar os jogos (${err.message}). Verifique a APIFOOTBALL_KEY.</p>`;
   }
-};
+}
+
+fixtureTabs.addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab');
+  if (!btn) return;
+  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+  btn.classList.add('active');
+  loadFixtures(btn.dataset.scope);
+});
+
+fixturesList.addEventListener('click', async (e) => {
+  const row = e.target.closest('.fixture-row');
+  if (!row) return;
+  const idx = row.dataset.idx;
+  const fx = currentFixtures[idx];
+  const box = document.getElementById(`predict-${idx}`);
+  if (!fx.homeId || !fx.awayId) return;
+
+  if (!box.hidden) { box.hidden = true; return; }
+
+  box.hidden = false;
+  box.innerHTML = '<p class="empty">Calculando previsão a partir dos últimos jogos…</p>';
+
+  try {
+    const url = new URL(API, window.location.origin);
+    url.searchParams.set('action', 'predict');
+    url.searchParams.set('home', fx.homeId);
+    url.searchParams.set('away', fx.awayId);
+    const res = await fetch(url);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Erro ao calcular previsão');
+
+    box.innerHTML = `
+      <p class="predict-meta">Baseado em ${json.homeMatchesAnalyzed} jogos de ${fx.home} e ${json.awayMatchesAnalyzed} jogos de ${fx.away}</p>
+      ${json.markets.map((m) => `
+        <div class="predict-row">
+          <div>
+            ${m.marketLabel}${m.isEstimate ? '<span class="estimate-tag">estimativa</span>' : ''}
+            <div class="predict-sub">${fx.home}: ${m.homeAvg} · ${fx.away}: ${m.awayAvg} · linha sugerida: mais de ${m.suggestedLine}</div>
+          </div>
+          <div class="pv">${m.predictedTotal}</div>
+        </div>
+      `).join('')}
+    `;
+  } catch (err) {
+    box.innerHTML = `<p class="empty">Não foi possível calcular (${err.message}).</p>`;
+  }
+});
+
+loadFixtures('today');
+</script>
+</body>
+</html>
